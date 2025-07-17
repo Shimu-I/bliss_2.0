@@ -1,6 +1,6 @@
 <?php
-session_start();
-require_once 'includes/db_connect.php';
+include 'includes/db_connect.php';
+include 'includes/header.php';
 
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
@@ -8,89 +8,42 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 $user_id = $_SESSION['user_id'];
-$role = $_SESSION['role'];
+$role_id = $_SESSION['role_id'];
 
-// Fetch user details
-$stmt = $conn->prepare("SELECT first_name, last_name, email FROM Users WHERE user_id = ?");
-$stmt->bind_param("i", $user_id);
+if ($role_id == 1) {
+    $sql = "SELECT c.child_id, c.first_name, c.last_name, a.check_in_time, a.check_out_time 
+            FROM children c LEFT JOIN attendance a ON c.child_id = a.child_id AND a.date = CURDATE() 
+            WHERE c.parent_id = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $user_id);
+} else {
+    $sql = "SELECT c.child_id, c.first_name, c.last_name, a.check_in_time, a.check_out_time 
+            FROM children c LEFT JOIN attendance a ON c.child_id = a.child_id AND a.date = CURDATE()";
+}
+$stmt = $conn->prepare($sql);
+if ($role_id == 1) $stmt->bind_param("i", $user_id);
 $stmt->execute();
-$user = $stmt->get_result()->fetch_assoc();
-$stmt->close();
+$result = $stmt->get_result();
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Daycare Management</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css">
-</head>
-<body>
-    <?php include 'includes/header.php'; ?>
-    <div class="container mt-5">
-        <h2>Welcome, <?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?>!</h2>
-        <p>Role: <?php echo htmlspecialchars($role); ?></p>
-        <?php if ($role === 'Parent') { ?>
-            <h3>Your Children</h3>
-            <?php
-            $stmt = $conn->prepare("SELECT child_id, first_name, last_name FROM Children WHERE parent_id = ? AND deleted_at IS NULL");
-            $stmt->bind_param("i", $user_id);
-            $stmt->execute();
-            $children = $stmt->get_result();
-            ?>
-            <table class="table table-striped">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php while ($child = $children->fetch_assoc()) { ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($child['first_name'] . ' ' . $child['last_name']); ?></td>
-                            <td><a href="attendance.php?child_id=<?php echo $child['child_id']; ?>" class="btn btn-sm btn-primary">View Attendance</a></td>
-                        </tr>
-                    <?php } ?>
-                </tbody>
-            </table>
-            <?php $stmt->close(); ?>
-        <?php } elseif ($role === 'Caregiver') { ?>
-            <h3>Your Assigned Children</h3>
-            <?php
-            $stmt = $conn->prepare("SELECT c.child_id, c.first_name, c.last_name 
-                                    FROM Children c 
-                                    JOIN Caregiver_Child_Assignments cca ON c.child_id = cca.child_id 
-                                    WHERE cca.caregiver_id = ? AND cca.end_date IS NULL");
-            $stmt->bind_param("i", $user_id);
-            $stmt->execute();
-            $children = $stmt->get_result();
-            ?>
-            <table class="table table-striped">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php while ($child = $children->fetch_assoc()) { ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($child['first_name'] . ' ' . $child['last_name']); ?></td>
-                            <td><a href="attendance.php?child_id=<?php echo $child['child_id']; ?>" class="btn btn-sm btn-primary">Manage Attendance</a></td>
-                        </tr>
-                    <?php } ?>
-                </tbody>
-            </table>
-            <?php $stmt->close(); ?>
-        <?php } elseif ($role === 'Admin') { ?>
-            <h3>Admin Dashboard</h3>
-            <p>Manage users, caregivers, and system settings.</p>
-            <a href="attendance.php" class="btn btn-primary">View All Attendance</a>
-        <?php } ?>
-    </div>
-    <?php include 'includes/footer.php'; ?>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+
+<h2>Dashboard</h2>
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Child Name</th>
+            <th>Check-In Time</th>
+            <th>Check-Out Time</th>
+        </tr>
+    </thead>
+    <tbody>
+        <?php while ($row = $result->fetch_assoc()): ?>
+            <tr>
+                <td><?php echo $row['first_name'] . ' ' . $row['last_name']; ?></td>
+                <td><?php echo $row['check_in_time'] ? $row['check_in_time'] : 'N/A'; ?></td>
+                <td><?php echo $row['check_out_time'] ? $row['check_out_time'] : 'N/A'; ?></td>
+            </tr>
+        <?php endwhile; ?>
+    </tbody>
+</table>
+
+<?php include 'includes/footer.php'; ?>

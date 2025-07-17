@@ -1,12 +1,15 @@
 <?php
+session_start();
 $host = 'localhost';
-$db = 'daycare_management';
-$user = 'root';
-$pass = 'admin';
+$dbname = 'daycare_management';
+$username = 'root';
+$password = 'admin';
 
-$conn = new mysqli($host, $user, $pass, $db);
-
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+try {
+    $conn = new mysqli($host, $username, $password, $dbname);
+    if ($conn->connect_error) {
+        throw new Exception("Connection failed: " . $conn->connect_error);
+    }
+} catch (Exception $e) {
+    die("Error: " . $e->getMessage());
 }
-?>

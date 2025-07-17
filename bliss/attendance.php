@@ -1,131 +1,53 @@
 <?php
-session_start();
-require_once 'includes/db_connect.php';
+include 'includes/db_connect.php';
+include 'includes/header.php';
 
-if (!isset($_SESSION['user_id'])) {
+if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] != 2) {
     header("Location: login.php");
     exit;
 }
 
-$role = $_SESSION['role'];
-$child_id = isset($_GET['child_id']) ? (int)$_GET['child_id'] : 0;
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($role === 'Caregiver' || $role === 'Admin')) {
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['child_id'])) {
     $child_id = $_POST['child_id'];
-    $action = $_POST['action'];
-    $current_time = date('Y-m-d H:i:s');
-    $current_date = date('Y-m-d');
+    $sql = "INSERT INTO attendance (child_id, check_in_time, date) VALUES (?, NOW(), CURDATE()) 
+            ON DUPLICATE KEY UPDATE check_in_time = NOW()";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $child_id);
+    $stmt->execute();
 
-    $stmt = $conn->prepare("SELECT attendance_id, check_in_time, check_out_time 
-                            FROM Attendance 
-                            WHERE child_id = ? AND date = ?");
-    $stmt->bind_param("is", $child_id, $current_date);
+    $sql = "SELECT parent_id FROM children WHERE child_id = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $child_id);
     $stmt->execute();
     $result = $stmt->get_result();
-    $attendance = $result->fetch_assoc();
+    $parent = $result->fetch_assoc();
+    $parent_id = $parent['parent_id'];
 
-    if ($action === 'check_in' && !$attendance) {
-        $stmt = $conn->prepare("INSERT INTO Attendance (child_id, check_in_time, date) VALUES (?, ?, ?)");
-        $stmt->bind_param("iss", $child_id, $current_time, $current_date);
-        $stmt->execute();
-    } elseif ($action === 'check_out' && $attendance && !$attendance['check_out_time']) {
-        $stmt = $conn->prepare("UPDATE Attendance SET check_out_time = ? WHERE attendance_id = ?");
-        $stmt->bind_param("si", $current_time, $attendance['attendance_id']);
-        $stmt->execute();
-    }
-    $stmt->close();
+    $message = "Child checked in at " . date('h:i A');
+    $sql = "INSERT INTO notifications (user_id, message, notification_type, channel) 
+            VALUES (?, ?, 'Attendance', 'SMS')";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("is", $parent_id, $message);
+    $stmt->execute();
+
+    echo "<p class='text-success'>Check-in recorded!</p>";
 }
 
-// Fetch attendance records
-$where_clause = $role === 'Parent' ? "WHERE a.child_id IN (SELECT child_id FROM Children WHERE parent_id = ?)" : "";
-$params = $role === 'Parent' ? [$_SESSION['user_id']] : [];
-if ($child_id && $role !== 'Admin') {
-    $where_clause .= ($where_clause ? " AND" : "WHERE") . " a.child_id = ?";
-    $params[] = $child_id;
-}
-
-$stmt = $conn->prepare("SELECT a.attendance_id, a.child_id, c.first_name, c.last_name, a.check_in_time, a.check_out_time, a.date 
-                        FROM Attendance a 
-                        JOIN Children c ON a.child_id = c.child_id 
-                        $where_clause 
-                        ORDER BY a.date DESC 
-                        LIMIT 10");
-if ($params) {
-    $stmt->bind_param(str_repeat("i", count($params)), ...$params);
-}
-$stmt->execute();
-$attendances = $stmt->get_result();
+$sql = "SELECT child_id, first_name, last_name FROM children";
+$result = $conn->query($sql);
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Attendance - Daycare Management</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css">
-</head>
-<body>
-    <?php include 'includes/header.php'; ?>
-    <div class="container mt-5">
-        <h2>Attendance Management</h2>
-        <?php if ($role === 'Caregiver' || $role === 'Admin') { ?>
-            <form method="POST" class="mb-4">
-                <div class="row">
-                    <div class="col-md-4">
-                        <select name="child_id" class="form-select" required>
-                            <option value="">Select Child</option>
-                            <?php
-                            $query = $role === 'Caregiver' 
-                                ? "SELECT c.child_id, c.first_name, c.last_name 
-                                   FROM Children c 
-                                   JOIN Caregiver_Child_Assignments cca ON c.child_id = cca.child_id 
-                                   WHERE cca.caregiver_id = ? AND cca.end_date IS NULL"
-                                : "SELECT child_id, first_name, last_name FROM Children WHERE deleted_at IS NULL";
-                            $stmt = $conn->prepare($query);
-                            if ($role === 'Caregiver') {
-                                $stmt->bind_param("i", $_SESSION['user_id']);
-                            }
-                            $stmt->execute();
-                            $children = $stmt->get_result();
-                            while ($child = $children->fetch_assoc()) {
-                                echo "<option value='{$child['child_id']}'>" . htmlspecialchars($child['first_name'] . ' ' . $child['last_name']) . "</option>";
-                            }
-                            $stmt->close();
-                            ?>
-                        </select>
-                    </div>
-                    <div class="col-md-4">
-                        <button type="submit" name="action" value="check_in" class="btn btn-success">Check In</button>
-                        <button type="submit" name="action" value="check_out" class="btn btn-warning">Check Out</button>
-                    </div>
-                </div>
-            </form>
-        <?php } ?>
-        <h3>Attendance Records</h3>
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Child</th>
-                    <th>Date</th>
-                    <th>Check-In</th>
-                    <th>Check-Out</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php while ($attendance = $attendances->fetch_assoc()) { ?>
-                    <tr>
-                        <td><?php echo htmlspecialchars($attendance['first_name'] . ' ' . $attendance['last_name']); ?></td>
-                        <td><?php echo htmlspecialchars($attendance['date']); ?></td>
-                        <td><?php echo htmlspecialchars($attendance['check_in_time'] ?: 'N/A'); ?></td>
-                        <td><?php echo htmlspecialchars($attendance['check_out_time'] ?: 'N/A'); ?></td>
-                    </tr>
-                <?php } ?>
-            </tbody>
-        </table>
-    </div>
-    <?php $stmt->close(); ?>
-    <?php include 'includes/footer.php'; ?>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+
+<h2>Attendance Check-In</h2>
+<form method="POST">
+    <select name="child_id" class="form-select mb-3" required>
+        <option value="">Select Child</option>
+        <?php while ($row = $result->fetch_assoc()): ?>
+            <option value="<?php echo $row['child_id']; ?>">
+                <?php echo $row['first_name'] . ' ' . $row['last_name']; ?>
+            </option>
+        <?php endwhile; ?>
+    </select>
+    <button type="submit" class="btn btn-primary">Check In</button>
+</form>
+
+<?php include 'includes/footer.php'; ?>
